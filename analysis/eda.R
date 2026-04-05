@@ -19,3 +19,5 @@ hist(data$net_ecosystem_exchange,
 # Correlation check
 cor_matrix <- cor(data, use="complete.obs")
 print(cor_matrix)
+
+print("My GitHub connection works!")
