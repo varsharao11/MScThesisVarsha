@@ -1,0 +1,851 @@
+--- 
+title: "Time-Series Analysis and Forecasting of Net Ecosystem Exchange Using Environmental Variables"
+subtitle: "ST606 MSc Thesis"
+author: "Varsha Jaknampally"
+date: "`r Sys.Date()`" 
+output: 
+  html_document: 
+    toc: true 
+    toc_float: true                
+    number_sections: true          
+    theme: cosmo 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = "center",       
+  fig.width = 10, 
+  fig.height = 6 
+) 
+
+```
+
+
+```{r}
+# Load Required Libraries
+library(ggplot2) 
+library(lubridate)
+library(corrplot) 
+library(dplyr) 
+library(prophet)
+
+library(tsibble) 
+library(feasts) 
+library(fable)
+library(fpp3)
+
+library(scales)
+```
+
+
+```{r}
+
+theme_set(
+
+  theme_minimal(base_size = 14) +
+
+    theme(
+
+      plot.title = element_text(
+        face = "bold",
+        size = 18,
+        hjust = 0.5,
+        colour = "#1B4332"
+      ),
+
+      plot.subtitle = element_text(
+        size = 12,
+        hjust = 0.5,
+        colour = "#555555"
+      ),
+
+      axis.title = element_text(
+        face = "bold",
+        size = 13,
+        colour = "#1B4332"
+      ),
+
+      axis.text = element_text(
+        colour = "#333333"
+      ),
+
+      panel.grid.minor = element_blank(),
+
+      panel.grid.major = element_line(
+        colour = "#E5E5E5",
+        linewidth = 0.3
+      ),
+
+      plot.caption = element_text(
+        size = 10,
+        colour = "#666666",
+        hjust = 1
+      )
+    )
+)
+
+```
+
+# Abstract
+
+Net ecosystem exchange (NEE) is an important indicator of ecosystem carbon balance and plays a significant role in understanding environmental and climate-related processes. This study investigates the temporal behaviour and forecasting of NEE using environmental and meteorological variables collected at the Nivolet grassland site in Italy between 2019 and 2024.
+
+Exploratory data analysis, seasonal visualisation, correlation analysis, and time-series forecasting techniques were applied to investigate temporal structure and environmental relationships within the dataset. Both linear and nonlinear forecasting approaches were implemented, including Time-Series Linear Modelling (TSLM) and Prophet forecasting.
+
+The results demonstrated strong seasonal behaviour, temporal dependence, and important relationships between environmental variables and ecosystem carbon exchange dynamics. The nonlinear Prophet model further highlighted the importance of flexible forecasting approaches for modelling complex environmental systems.
+
+The findings demonstrate the usefulness of time-series forecasting methods for understanding ecosystem carbon exchange behaviour and supporting future environmental monitoring applications.
+
+
+# 1. Introduction
+
+Net ecosystem exchange (NEE) is an important indicator of carbon balance within ecosystems and plays a significant role in understanding climate change dynamics. Accurate prediction of NEE can support environmental monitoring, ecosystem management, and carbon cycle assessment.
+
+The objective of this project is to investigate the temporal behaviour and prediction of net ecosystem exchange using environmental and meteorological variables measured at the Nivolet grassland site in Italy.
+
+The dataset consists of half-hourly environmental observations collected between 2019 and 2024. The analysis focuses on exploratory visualisation, seasonal behaviour, temporal dependence, and forecasting approaches for ecosystem carbon exchange.
+
+Both statistical and time-series forecasting approaches are explored to evaluate predictive performance and understand environmental influences on NEE behaviour.
+
+
+# 2. Dataset Description
+
+The dataset used in this study contains half-hourly environmental observations collected at the Nivolet grassland site in Italy between 2019 and 2024.
+
+The dataset includes meteorological and ecosystem variables such as:
+
+* Net ecosystem exchange (NEE)
+* Air temperature
+* Incoming shortwave radiation
+* Incoming longwave radiation
+* Latent heat flux
+* Sensible heat flux
+* Wind speed
+* Precipitation
+
+The timestamp variable provides the temporal structure required for time-series analysis and forecasting methods.
+
+
+```{r}
+data <- readRDS("../data/Nivolet.rds")
+```
+
+# 3. Initial Dataset Inspection
+
+```{r}
+glimpse(data) 
+summary(data)
+```
+
+The dataset contains over 100,000 half-hourly environmental observations and multiple meteorological variables associated with ecosystem carbon exchange. Initial inspection confirmed that the dataset contains continuous timestamp measurements alongside environmental predictors relevant for forecasting and regression analysis.
+
+
+# 4. Data Preprocessing and Quality Assessment
+
+Prior to modelling, the dataset was examined for missing values, duplicate timestamps, invalid measurements, and temporal consistency. These checks are important for ensuring the reliability and integrity of environmental time-series data before forecasting and predictive modelling are performed.
+
+
+
+```{r}
+
+# Missing Values
+
+missing_summary <- data.frame(
+  Variable = names(data),
+  Missing_Values = colSums(is.na(data)),
+  Missing_Percentage =
+    round(colMeans(is.na(data)) * 100, 2)
+)
+
+missing_summary
+
+# Infinite Values
+
+sapply(
+  data,
+  function(x)
+    sum(is.infinite(x))
+)
+
+# Duplicate Timestamps
+
+sum(duplicated(data$timestamp))
+
+# Temporal Consistency
+
+time_diff <- diff(data$timestamp)
+
+table(time_diff)
+
+```
+
+
+The data quality assessment indicated no substantial missing values, duplicate timestamps, or temporal inconsistencies within the dataset. Observations were recorded consistently at half-hour intervals, making the dataset suitable for time-series forecasting applications.
+
+
+
+# 5. Feature Engineering
+
+Additional temporal variables were extracted from the timestamp variable to capture seasonal and temporal patterns within the dataset. These engineered features may contribute to improved forecasting and predictive modelling performance.
+
+
+```{r}
+# Time-Based Feature Engineering
+
+data <- data %>% 
+  mutate( 
+    year = year(timestamp), 
+    month = month(timestamp), 
+    week = week(timestamp), 
+    hour = hour(timestamp), 
+    day_of_year = yday(timestamp)
+    )
+```
+Additional temporal variables including year, month, hour, and day of year were extracted from the timestamp variable. These features were created to capture seasonal and temporal patterns potentially influencing ecosystem carbon exchange behaviour.
+
+
+# 6. Exploratory Data Analysis
+
+Exploratory data analysis was performed to investigate the distribution, temporal behaviour, seasonal variation, and relationships between environmental variables and net ecosystem exchange. Visualisation techniques were used to identify important patterns and trends within the dataset.
+
+## Distribution of Net Ecosystem Exchange
+
+```{r fig.cap="Distribution of net ecosystem exchange values observed at the Nivolet site."}
+
+ggplot(data,
+       aes(x = net_ecosystem_exchange)) +
+
+  geom_histogram(
+    bins = 40,
+     fill = "#40916C",
+    colour = "white",
+    alpha = 0.9
+  ) +
+
+  geom_vline(
+    aes(xintercept = mean(net_ecosystem_exchange)),
+    colour = "#D62828",
+    linewidth = 1.2,
+    linetype = "dashed"
+  ) +
+
+  labs(
+    title = "Distribution of Net Ecosystem Exchange",
+    subtitle = "Histogram of NEE observations from 2019–2024",
+    x = "Net Ecosystem Exchange",
+    y = "Frequency",
+    caption = "Distribution of half-hourly NEE observations."
+  )
+
+```
+
+The distribution of net ecosystem exchange demonstrates substantial variability across the observation period. The presence of both positive and negative values reflects alternating periods of ecosystem carbon release and carbon uptake.
+
+
+## Time-Series Plot of NEE
+
+```{r fig.cap="Time-series plot of net ecosystem exchange from 2019 to 2024."}
+
+ggplot(data,
+       aes(x = timestamp,
+           y = net_ecosystem_exchange)) +
+
+   geom_line(
+    colour = "#2D6A4F",
+    alpha = 0.35
+  ) +
+
+  geom_smooth(
+    colour = "#D62828",
+    linewidth = 1.2,
+    se = FALSE
+  ) +
+
+  labs(
+    title = "Net Ecosystem Exchange Over Time",
+    subtitle = "Half-hourly observations from the Nivolet grassland site",
+    x = "Year",
+    y = "Net Ecosystem Exchange",
+    caption = "Temporal behaviour of ecosystem carbon exchange across the study period."
+  )
+
+```
+
+
+The time-series plot demonstrates substantial temporal variation and recurring seasonal behaviour throughout the observation period. Several fluctuations and extreme observations are visible, suggesting that ecosystem carbon exchange is strongly influenced by changing environmental conditions.
+
+
+
+# 7. Time-Series Structure and Seasonal Analysis
+
+
+The dataset was converted into a tsibble object to enable time-series visualisation and forecasting analysis using the fpp3 framework.
+
+
+```{r}
+# Convert Original Dataset to Tsibble
+
+data_ts <- data %>%
+  as_tsibble(index = timestamp)
+```
+
+## Seasonal Plot
+
+```{r fig.cap="Seasonal plot of net ecosystem exchange across years."}
+data_ts %>%
+  gg_season(
+    net_ecosystem_exchange,
+    labels = NULL,
+    linewidth = 0.4,
+    alpha = 0.7
+  ) +
+
+  geom_hline(
+    yintercept = mean(data$net_ecosystem_exchange),
+    linetype = "dashed",
+    colour = "#D62828",
+    linewidth = 0.7,
+    alpha = 0.6
+  ) +
+
+  labs(
+    title = "Seasonal Behaviour of Net Ecosystem Exchange",
+    subtitle = "Seasonal variation across years",
+    y = "Net Ecosystem Exchange"
+  ) +
+
+  xlab(NULL) +
+
+  coord_cartesian(
+    ylim = c(-15, 15)
+  ) +
+
+  theme(
+    legend.position = "none",
+
+    plot.title = element_text(
+      face = "bold",
+      size = 20,
+      hjust = 0.5,
+      colour = "#1B4332"
+    ),
+
+    plot.subtitle = element_text(
+      size = 12,
+      hjust = 0.5,
+      colour = "#555555"
+    ),
+
+    axis.title = element_text(
+      face = "bold",
+      size = 14,
+      colour = "#1B4332"
+    ),
+
+    axis.text = element_text(
+      size = 11,
+      colour = "#333333"
+    ),
+
+    panel.grid.minor = element_blank(),
+
+    panel.grid.major = element_line(
+      colour = "#E5E5E5",
+      linewidth = 0.3
+    )
+  )
+```
+
+The seasonal plot reveals recurring annual patterns in net ecosystem exchange, indicating strong seasonal behaviour within the ecosystem carbon exchange process. Similar patterns are visible across multiple years, supporting the suitability of time-series forecasting methods.
+
+
+## Monthly Subseries Plot
+
+```{r}
+
+# Monthly Aggregation
+
+monthly_data <- data %>%
+  mutate(month_year = yearmonth(timestamp)) %>%
+  group_by(month_year) %>%
+  summarise(
+    net_ecosystem_exchange =
+      mean(net_ecosystem_exchange,
+           na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+monthly_ts <- monthly_data %>%
+  as_tsibble(index = month_year)
+```
+
+## Monthly Aggregation
+
+```{r fig.cap="Monthly subseries plot of net ecosystem exchange."}
+
+monthly_ts %>%
+  gg_subseries(net_ecosystem_exchange) +
+
+  labs(
+    title = "Monthly Subseries Plot of Net Ecosystem Exchange",
+    subtitle = "Monthly average NEE behaviour",
+    x = "Month",
+    y = "Mean Net Ecosystem Exchange"
+  )+ theme(
+  legend.position = "none"
+)
+
+```
+
+The subseries plot highlights noticeable monthly variation in net ecosystem exchange, with some months demonstrating substantially different average behaviour compared to others. This further confirms the presence of strong seasonal structure within the dataset.
+
+
+# 8. Correlation and Environmental Relationship Analysis
+
+Correlation analysis was performed to investigate relationships between environmental variables and net ecosystem exchange. Understanding these relationships is important for identifying influential predictors and guiding subsequent modelling approaches.
+
+
+```{r fig.cap="Correlation matrix of environmental variables and net ecosystem exchange."}
+
+# -------------------------------
+# Correlation Matrix Preparation
+# -------------------------------
+
+cor_data <- data %>%
+  select(
+    net_ecosystem_exchange,
+    incoming_shortwave_radiation,
+    latent_heat_flux,
+    sensible_heat_flux,
+    air_temperature,
+    wind_speed,
+    vapour_pressure_deficit
+  )
+
+cor_matrix <- cor(
+  cor_data,
+  use = "complete.obs"
+)
+
+# -------------------------------
+# Clean Variable Names
+# -------------------------------
+
+clean_names <- c(
+  "NEE",
+  "SW Radiation",
+  "Latent Heat",
+  "Sensible Heat",
+  "Air Temp",
+  "Wind Speed",
+  "VPD"
+)
+
+colnames(cor_matrix) <- clean_names
+rownames(cor_matrix) <- clean_names
+
+# -------------------------------
+# Correlation Heatmap
+# -------------------------------
+
+par(
+  cex.main = 1.3
+)
+
+corrplot(
+  cor_matrix,
+
+  method = "color",
+  type = "lower",
+
+  col = colorRampPalette(
+    c("#D73027", "#F7F7F7", "#2D6A4F")
+  )(200),
+
+  addCoef.col = "black",
+
+  number.cex = 0.6,
+
+  tl.col = "#1B4332",
+  tl.cex = 1,
+  tl.srt = 45,
+
+  diag = FALSE,
+
+  cl.pos = "n",
+
+  mar = c(0, 0, 2, 0),
+
+  title = "Correlation Structure of Environmental Variables"
+)
+```
+
+The correlation analysis identified notable relationships between net ecosystem exchange and several environmental variables. Incoming shortwave radiation, latent heat flux, and sensible heat flux demonstrated relatively strong negative correlations with NEE, suggesting that energy balance and radiation variables play important roles in ecosystem carbon exchange dynamics.
+
+
+## 8.1 Relationship Between Radiation and Net Ecosystem Exchange
+
+Scatter plot visualisation was used to further investigate the relationship between incoming shortwave radiation and net ecosystem exchange. Radiation is closely associated with photosynthetic activity and may therefore strongly influence ecosystem carbon uptake behaviour.
+
+
+```{r fig.cap="Relationship between incoming shortwave radiation and net ecosystem exchange."}
+
+ggplot(data,
+       aes(x = incoming_shortwave_radiation,
+           y = net_ecosystem_exchange)) +
+
+  geom_point(
+    alpha = 0.08,
+    colour = "#40916C"
+  ) +
+
+  geom_smooth(
+    method = "lm",
+    se = FALSE,
+    colour = "#D62828",
+    linewidth = 1.2
+  ) +
+  labs(
+    title = "Radiation vs NEE",
+    subtitle = "Relationship between radiation and ecosystem carbon exchange",
+    x = "Incoming Shortwave Radiation",
+    y = "Net Ecosystem Exchange",
+    caption = "Higher radiation levels are associated with changes in ecosystem carbon exchange."
+  )
+
+```
+
+
+The scatter plot demonstrates a noticeable negative relationship between incoming shortwave radiation and net ecosystem exchange. Higher radiation levels are generally associated with increased ecosystem carbon uptake, reflecting the influence of photosynthetic activity during periods of greater sunlight exposure.
+
+## Autocorrelation Analysis
+
+Autocorrelation analysis was performed to investigate temporal dependence within the net ecosystem exchange series. Time-series environmental data commonly exhibit autocorrelation due to recurring seasonal and temporal structures.
+
+
+```{r fig.cap="Autocorrelation function of net ecosystem exchange."}
+
+data_ts %>%
+  ACF(net_ecosystem_exchange) %>%
+  autoplot() +
+
+  labs(
+    title = "Autocorrelation of NEE",
+    subtitle = "Temporal dependence structure of the NEE series"
+  )
+
+```
+
+The autocorrelation plot indicates strong temporal dependence within the net ecosystem exchange series. Significant autocorrelation at multiple lags suggests that previous observations may provide useful information for forecasting future ecosystem carbon exchange behaviour.
+
+## Time-Series Decomposition
+
+Seasonal-Trend decomposition using Loess (STL) was applied to separate the net ecosystem exchange series into trend, seasonal, and remainder components. Decomposition techniques assist in understanding underlying temporal structures within environmental time-series data.
+
+```{r fig.cap="STL decomposition of net ecosystem exchange."}
+
+monthly_ts %>%
+  model(
+    STL(net_ecosystem_exchange)
+  ) %>%
+  components() %>%
+  autoplot() +
+
+  labs(
+    title = "STL Decomposition of Net Ecosystem Exchange"
+  )
+
+```
+
+The STL decomposition separates the series into trend, seasonal, and remainder components. The results indicate strong recurring seasonal behaviour alongside relatively stable long-term ecosystem carbon exchange patterns across the study period.
+
+# Time-Series Linear Modelling
+
+A time-series linear modelling approach was implemented using the fpp3 framework. Unlike ordinary linear regression, the TSLM approach incorporates trend and seasonal components alongside environmental predictors, making it more appropriate for environmental time-series forecasting applications.
+
+
+```{r}
+
+# Daily Aggregation
+
+daily_model_data <- data %>%
+  mutate(date = as.Date(timestamp)) %>%
+  group_by(date) %>%
+  summarise(
+    net_ecosystem_exchange =
+      mean(net_ecosystem_exchange,
+           na.rm = TRUE),
+
+    air_temperature =
+      mean(air_temperature,
+           na.rm = TRUE),
+
+    incoming_shortwave_radiation =
+      mean(incoming_shortwave_radiation,
+           na.rm = TRUE),
+
+    latent_heat_flux =
+      mean(latent_heat_flux,
+           na.rm = TRUE),
+
+    sensible_heat_flux =
+      mean(sensible_heat_flux,
+           na.rm = TRUE)
+  )
+
+daily_ts <- daily_model_data %>%
+  as_tsibble(index = date)
+
+```
+
+
+```{r}
+
+# TSLM Train-Test Split
+
+train_ts <- daily_ts %>%
+  filter(year(date) < 2024)
+
+test_ts <- daily_ts %>%
+  filter(year(date) == 2024)
+
+```
+
+# TSLM Model
+```{r}
+
+# Time-Series Linear Model
+
+model_tslm <- train_ts %>%
+  model(
+    tslm_model =
+      TSLM(
+        net_ecosystem_exchange ~
+          trend() +
+          season() +
+          air_temperature +
+          incoming_shortwave_radiation +
+          latent_heat_flux +
+          sensible_heat_flux
+      )
+  )
+
+report(model_tslm)
+
+```
+
+The TSLM model incorporates trend and seasonal structures alongside environmental predictors. This allows the model to account for temporal dependence and recurring seasonal behaviour within the ecosystem carbon exchange series.
+
+
+# Forecasting and Evaluation
+
+
+```{r}
+
+# Generate Forecasts
+
+forecast_tslm <- model_tslm %>%
+  forecast(new_data = test_ts)
+
+forecast_tslm
+
+```
+
+
+```{r fig.cap="Forecasted and observed net ecosystem exchange values from the TSLM model."}
+
+autoplot(
+  forecast_tslm,
+  test_ts
+) +
+
+  labs(
+    title = "TSLM Forecast vs Observed Values",
+    subtitle = "Forecast evaluation using 2024 observations",
+    x = "Date",
+    y = "Net Ecosystem Exchange"
+  )
+```
+
+The forecasting plot compares predicted net ecosystem exchange values against observed test observations. The TSLM model captures general seasonal behaviour and temporal structure within the series, demonstrating the usefulness of time-series forecasting approaches for environmental prediction tasks.
+
+
+## TSLM Forecast Accuracy
+```{r}
+
+# Forecast Accuracy
+
+accuracy(
+  forecast_tslm,
+  test_ts
+)
+
+```
+
+
+Forecast accuracy metrics provide quantitative measures of forecasting performance on unseen data. These metrics may be used to compare alternative forecasting and machine learning models in future stages of the project.
+
+## Residual Diagnostics
+```{r fig.cap="Residual diagnostics for the TSLM forecasting model."}
+
+gg_tsresiduals(model_tslm)
+
+```
+
+Residual diagnostics indicate that the TSLM model captures a substantial proportion of the temporal structure within the series. However, some remaining temporal dependence suggests that more flexible nonlinear approaches may further improve forecasting performance.
+
+# Nonlinear Forecasting Using Prophet
+
+Environmental systems often exhibit nonlinear temporal behaviour and complex seasonal structures that may not be fully captured by linear forecasting approaches. To investigate these nonlinear dynamics, the Prophet forecasting model was implemented as an additional forecasting approach.
+
+Prophet is a decomposable time-series forecasting model that incorporates nonlinear trend estimation, seasonal behaviour, and temporal change points. The method is particularly suitable for environmental and seasonal datasets.
+
+```{r}
+
+# Prepare Data for Prophet
+
+prophet_data <- daily_model_data %>%
+  select(
+    date,
+    net_ecosystem_exchange
+  ) %>%
+  rename(
+    ds = date,
+    y = net_ecosystem_exchange
+  )
+
+# Train-Test Split
+
+train_prophet <- prophet_data %>%
+  filter(year(ds) < 2024)
+
+test_prophet <- prophet_data %>%
+  filter(year(ds) == 2024)
+
+```
+
+```{r}
+
+# Fit Prophet Model
+
+model_prophet <- prophet(
+  train_prophet,
+  yearly.seasonality = TRUE,
+  weekly.seasonality = TRUE,
+  daily.seasonality = FALSE
+)
+
+```
+
+```{r}
+
+# Create Future Dataframe
+
+future <- make_future_dataframe(
+  model_prophet,
+  periods = nrow(test_prophet)
+)
+
+# Generate Forecasts
+
+forecast_prophet <- predict(
+  model_prophet,
+  future
+)
+
+```
+
+```{r fig.cap="Forecast generated using the Prophet nonlinear forecasting model."}
+
+plot(
+  model_prophet,
+  forecast_prophet
+)
+
+```
+
+The Prophet forecasting model identified nonlinear trend and seasonal structures within the net ecosystem exchange series. Compared with linear forecasting approaches, Prophet provides greater flexibility for modelling complex environmental time-series behaviour.
+
+```{r fig.cap="Prophet model components showing trend and seasonal structure."}
+
+prophet_plot_components(
+  model_prophet,
+  forecast_prophet
+)
+
+```
+
+The Prophet decomposition illustrates trend and seasonal behaviour captured by the nonlinear forecasting framework. The yearly seasonal component demonstrates recurring environmental patterns associated with ecosystem carbon exchange dynamics.
+
+```{r}
+
+# Extract Forecast Values
+
+predicted_prophet <- forecast_prophet %>%
+  tail(nrow(test_prophet))
+
+# RMSE
+
+rmse_prophet <- sqrt(
+  mean(
+    (
+      test_prophet$y -
+        predicted_prophet$yhat
+    )^2
+  )
+)
+
+# MAE
+
+mae_prophet <- mean(
+  abs(
+    test_prophet$y -
+      predicted_prophet$yhat
+  )
+)
+
+cat(
+  "Prophet RMSE:",
+  round(rmse_prophet, 3),
+  "\n"
+)
+
+cat(
+  "Prophet MAE:",
+  round(mae_prophet, 3)
+)
+
+```
+
+The Prophet model demonstrated the ability to capture nonlinear seasonal behaviour and temporal variation within the net ecosystem exchange series. The forecasting results suggest that nonlinear approaches may provide improved flexibility for modelling environmental carbon exchange dynamics compared with purely linear forecasting methods.
+
+# Conclusion
+
+This study investigated the temporal behaviour and forecasting of net ecosystem exchange using environmental and meteorological observations collected from the Nivolet grassland site.
+
+Exploratory analysis identified strong seasonal patterns, temporal dependence, and substantial relationships between environmental variables and ecosystem carbon exchange behaviour. Both linear and nonlinear forecasting approaches successfully captured important temporal structures within the dataset.
+
+The Prophet nonlinear forecasting model demonstrated greater flexibility in modelling seasonal and environmental dynamics compared with purely linear approaches. Overall, the study highlights the usefulness of time-series forecasting methods for analysing ecosystem carbon exchange processes and supporting future environmental monitoring applications.
+
+
+# Future Work
+
+This study implemented both linear and nonlinear forecasting approaches for modelling net ecosystem exchange behaviour. While the TSLM and Prophet models successfully captured important temporal and seasonal patterns, additional nonlinear machine learning approaches may further improve predictive performance.
+
+Future work will investigate advanced nonlinear models including Random Forest, XGBoost, Gradient Boosting, and Generalised Additive Models (GAMs). Additional lag-based predictors, feature engineering strategies, and external environmental variables may also improve forecasting accuracy and interpretability.
+
+I began with interpretable linear forecasting models before extending the analysis toward nonlinear forecasting approaches using Prophet to better capture complex seasonal and environmental behaviour.
+
+
+# References
+
+Hyndman, R. J., & Athanasopoulos, G. (2021). *Forecasting: Principles and Practice* (3rd ed.). OTexts. https://otexts.com/fpp3/
+
+Wickham, H. (2016). *ggplot2: Elegant Graphics for Data Analysis*. Springer-Verlag.
+
+Taylor, S. J., & Letham, B. (2018). Forecasting at Scale. *The American Statistician*, 72(1), 37–45.
+
+Wei, T., & Simko, V. (2021). *corrplot: Visualization of a Correlation Matrix*. R package version.
